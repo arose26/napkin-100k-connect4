@@ -12,11 +12,12 @@ verified on seven arenas — so the toolchain ports and only the environment cha
 Hence one repo per game. This one is CodinGame's
 [Connect 4](https://www.codingame.com/multiplayer/bot-programming/connect-4).
 
-**Status: not submitted.** The engine, the GPU self-play, and the packer are verified
-(below). A first training run is complete — **4,643,317 self-play games in 88 minutes
+**Status: submitted 2026-08-20, first ladder reading is provisional and BAD** — see
+*First contact with the ladder*. The engine, the GPU self-play, and the packer are
+verified (below). A first training run is complete — **4,643,317 self-play games in 88 minutes
 on one laptop GPU** — and its headline result is a *negative* one: six times the
 self-play bought about 0.085 of score, and my registered prediction (H4) was not met.
-There is no ladder number yet, and this README will not carry one until there is.
+The net is now on the arena and the early number does not flatter it.
 
 ## Why this game is not "just connect 4"
 
@@ -161,6 +162,76 @@ trained net will use STEAL in a clear majority of games where it is offered.
 **Answered: YES, and more sharply than predicted** — 80% after a random opening ply,
 100% after its own preferred opening. See *What the net learned about the pie rule*.
 
+
+## First contact with the ladder
+
+Submitted 2026-08-20 (test session 41168163). Before submitting, the bot was run
+through CodinGame's own sandbox endpoint, which compiles and plays a real game
+**without entering the arena** — the pre-submission check this README promised:
+
+| sandbox check | result |
+|---|---|
+| compiles on CG's g++ 11.2 with the AVX2 `target` pragma | **yes, no compilation error** |
+| runs without faulting (i.e. AVX2 really is present on the judges) | **yes, 12 frames** |
+| result of the test game | **won 10–0** |
+| value head at the empty board, on the judge | `v=0.281395` |
+| value head at the empty board, on this laptop | `v=0.281395` |
+
+That last pair is the useful one: the packed forward pass is numerically identical on
+the venue's hardware, so the quantisation and the base85 decode survive the trip.
+
+**First ladder snapshot (provisional — placement may still be settling):**
+
+```
+arena connect-4     926 ranked bots
+Napkin100k          global rank 669, score 22.43, league 0 (Wood)
+top of the ladder   RoboStac / _Royale / MrSubZero, score 46.07
+```
+
+Rank 669 of 926 is **below the median**, and still in Wood. H5's registered
+prediction was "clears Wood and Bronze on placement and finishes above the median."
+On this reading it is heading for falsified, which is recorded here now rather than
+after the fact. The league split is 259 bots in Wood and 668 above it, so global 669
+is the top of Wood — a promotion may still be pending. **Not resolving H5 until the
+score stops moving.**
+
+### The pragma is worth 5.4× and the judge is 3.9× slower
+
+CodinGame compiles C++ at `-O0` unless the source says otherwise, so this matters.
+Same source, same position, one mid-game turn at the 85 ms budget:
+
+| build | depth reached | nodes |
+|---|---|---|
+| `-O0`, pragmas stripped — *what a naive submission gets* | 5 | 2,144 |
+| `-O0`, with the pragmas — **what this bot ships as** | **7** | **11,616** |
+| `-O3`, pragmas stripped | 7 | 11,360 |
+
+The `optimize` pragma recovers full `-O3` behaviour under the venue's `-O0` default:
+**5.4× the nodes and two extra plies**, for four lines of source.
+
+And the judge's own speed, measured on the *identical* empty-board position at the
+same 900 ms budget:
+
+| | depth | nodes |
+|---|---|---|
+| this laptop (Core 5 210H) | 6 | 10,048 |
+| the CodinGame judge | 5 | 2,592 |
+
+**~3.9× slower**, so plan for one ply less than local benchmarking suggests. (The
+previous repo measured ~1.6× for a smaller net; this is worse, and worth carrying.)
+
+### A misreading I corrected before it became a conclusion
+
+The sandbox stderr showed `d=3 e=224` on mid-game turns, and my first reading was that
+the judge was ~50× slower than this laptop. It is not. The root search loop contains
+
+```c
+if(bv>=1.f) break;    /* a win is proven; stop searching */
+```
+
+so a small node count means the bot **found a forced win quickly**, not that it
+searched slowly. The 3.9× figure above comes from comparing the *same* position on
+both machines, which is the only comparison that was ever going to be meaningful.
 
 ## The plateau (H4) — and a prediction I registered badly
 
@@ -316,12 +387,9 @@ saturates, the only yardstick with headroom is net-versus-past-self, which is wh
 ## Honest limitations
 
 - **No ladder result.** Nothing has been submitted. H5 is open.
-- **The AVX2 target pragma is unverified at the venue.** CodinGame compiles C++ at
-  `-O0` unless the source says otherwise, so the optimise pragma is mandatory; the
-  `target` pragma that lets g++ vectorise the dot products assumes AVX2 on the
-  judges. That will be smoke-tested in the sandbox — CodinGame's `TestSession/play`
-  endpoint compiles and runs a bot **without** entering the arena — before any
-  submission, not after.
+- ~~The AVX2 target pragma is unverified at the venue.~~ **Resolved:** it compiles
+  and runs on the judges, and the packed forward pass is numerically identical there.
+  See *First contact with the ladder*.
 - **Strength is measured against one scripted opponent and the net's own past
   selves.** Neither is a population of independent opponents, and past-self scores
   cannot detect a whole lineage being stuck in the same local optimum. The ladder is
