@@ -953,9 +953,13 @@ def cmd_train_gpu(args):
         # checkpoint already knows.
         net, shape = load_aznet(args.init, device)
         net.train()
-        if shape[1] != AZ_TRUNK1 or shape[2] != AZ_TRUNK2:
-            raise ValueError(f"{args.init} is trunk {shape[1]}-{shape[2]} but this "
-                             f"build is {AZ_TRUNK1}-{AZ_TRUNK2}")
+        if list(shape) != [N_IN, AZ_TRUNK1, AZ_TRUNK2, N_ACT]:
+            # every dimension, not just the trunk: a checkpoint from a different
+            # encoder loads with a cryptic state-dict error instead of a clear one
+            raise ValueError(
+                f"{args.init} has shape {list(shape)} but this build is "
+                f"{[N_IN, AZ_TRUNK1, AZ_TRUNK2, N_ACT]}. Warm starting across a "
+                f"different feature layout would train on the wrong inputs.")
         print(f"warm start from {args.init} (trunk {shape[1]}-{shape[2]})", flush=True)
     else:
         net = build_aznet(device)
@@ -1944,6 +1948,28 @@ def cmd_selfcheck(args):
         assert np.abs(q.astype(np.float32) * s - w).max() < s
     except ImportError:
         print("selfcheck: numpy absent, skipped the quantisation assert")
+
+    # a checkpoint round trip, which is what --init and pack both depend on
+    try:
+        import tempfile
+        import torch
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "ck.pt")
+            net = build_aznet("cpu")
+            want = [N_IN, AZ_TRUNK1, AZ_TRUNK2, N_ACT]
+            torch.save({"state_dict": net.state_dict(), "shape": want}, path)
+            back, shape = load_aznet(path, "cpu")
+            assert list(shape) == want, (shape, want)
+            for k, v in net.state_dict().items():
+                assert torch.equal(v, back.state_dict()[k]), k
+            torch.save({"state_dict": net.state_dict()}, path)
+            try:
+                load_aznet(path, "cpu")
+                raise AssertionError("loaded a checkpoint with no shape")
+            except ValueError:
+                pass
+    except ImportError:
+        print("selfcheck: torch absent, skipped the checkpoint round trip")
 
     # the budget arithmetic the C++ template depends on
     assert N_IN == 305 and N_ACT == 10
