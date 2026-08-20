@@ -12,8 +12,9 @@ verified on seven arenas — so the toolchain ports and only the environment cha
 Hence one repo per game. This one is CodinGame's
 [Connect 4](https://www.codingame.com/multiplayer/bot-programming/connect-4).
 
-**Status: submitted 2026-08-20 — global rank 92 of 926, in the arena's top league,
-same league as the #1 bot.** See *First contact with the ladder*. The engine, the GPU self-play, and the packer are
+**Status: v1 reached global rank 92 of 926 in the arena's top league. A stronger v2
+(0.605 head-to-head against v1) was submitted 2026-08-20; its placement is still
+settling and this README will not quote a rank for it until it stops moving.** The engine, the GPU self-play, and the packer are
 verified (below). A first training run is complete — **4,643,317 self-play games in 88 minutes
 on one laptop GPU** — and its headline result is a *negative* one: six times the
 self-play bought about 0.085 of score, and my registered prediction (H4) was not met.
@@ -149,10 +150,13 @@ strength — that needs the past-self measurement below.*
 
 **H4 — does more self-play still buy strength?** Prediction registered before
 looking: the net will beat its own 1M-game checkpoint at better than 0.60 after
-another 3M games. **Answered: prediction NOT MET, though I registered it badly.** The
-final 4.64M-game net scores 0.585 (k=4) / 0.549 (k=8) against its 0.77M-game self and
-is indistinguishable from its 4.02M self. The threshold was registered without fixing
-the measurement protocol, and the verdict turns out to depend on it. See *The plateau*.
+another 3M games. **Answered: prediction NOT MET at fixed hyperparameters — but my
+conclusion from that was too broad.** The final 4.64M-game net scores 0.585 (k=4) /
+0.549 (k=8) against its 0.77M-game self. However, changing temperature and step size
+and continuing produced a net that beats it 0.605, so the flatness was a
+hyperparameter ceiling rather than a data ceiling. The threshold was also registered
+without fixing the measurement protocol, and the verdict depends on it. See *The
+plateau* and *v2*.
 
 **H5 — the ladder, and only the ladder, is the verdict.** Prediction registered
 before submission: the packed net clears Wood and Bronze on placement and finishes
@@ -249,6 +253,57 @@ if(bv>=1.f) break;    /* a win is proven; stop searching */
 so a small node count means the bot **found a forced win quickly**, not that it
 searched slowly. The 3.9× figure above comes from comparing the *same* position on
 both machines, which is the only comparison that was ever going to be meaningful.
+
+## v2: the plateau was a hyperparameter plateau, not a data plateau
+
+H4 measured v1 as flat from 1.5M to 4.6M games and I concluded that more self-play was
+not buying strength. That conclusion was too broad, and the correction is worth more
+than the original finding.
+
+Continuing from v1's weights with **two changes** — `tau` 0.5 → 0.2 (the sweep's best)
+and learning rate 1e-3 → 5e-4 — plus 5,268,011 further games (≈9.1M cumulative,
+2h01m):
+
+| v2 vs | score | 95% Wilson | note |
+|---|---|---|---|
+| **v1, the deployed net** — seed 1 | **0.605** | 0.584–0.626 | |
+| **v1, the deployed net** — seed 77 | **0.609** | 0.587–0.630 | replicated |
+| itself (null control) | 0.500 | 0.478–0.522 | protocol clean on this exact pair |
+| its own snapshot at iter 4000 | 0.515 | 0.494–0.537 | |
+| its own snapshot at iter 6000 | 0.516 | 0.494–0.537 | |
+| its own snapshot at iter 7500 | 0.521 | 0.499–0.543 | |
+
+So v1 was **not** at a ceiling imposed by self-play volume. It was at a ceiling imposed
+by its own step size and target temperature. Once those changed, the same architecture
+on the same environment gained 0.105 — an order of magnitude more than the 0.085 that
+v1's entire 6× increase in games had bought.
+
+**But note where the gain came from:** v2 beats its own iter-4000 snapshot by only
+0.015. Almost all of the improvement arrived in the first quarter of the run, and then
+it flattened again — the same shape as before, one level up. The plateau is a real
+phenomenon; it just is not where I first placed it.
+
+**Attribution, stated honestly: I cannot separate the three changes.** v2 differs from
+v1 in temperature, learning rate, *and* additional games, all at once. The controlled
+sweep says temperature alone is worth about 0.025 at equal compute, so most of the
+0.105 came from the smaller step size and/or the continued training — and this run does
+not tell me which. A clean attribution needs two more arms and was not run.
+
+**The value head finally moved.** It was the half nothing had touched: 0.90 → 0.826 in
+the previous repo, 0.6510 → 0.6155 across all of v1, 0.664 as the sweep's best. v2 ends
+at **0.5671**, the lowest recorded in either repo. The lower learning rate is the
+plausible cause and is untested as such.
+
+**And the scripted yardstick saw none of it.** Against `greedy` at k=8, v1 scores 0.881
+and v2 scores 0.883 — indistinguishable. The same two nets are separated cleanly at
+0.605 by the paired past-self measurement. One more entry in the case that a single
+scripted opponent has no resolution at this level, and that the instrument has to be
+built before the experiment is worth running.
+
+**v2's gates:** 98,373 bytes (1,627 under the cap), forward pass matching the
+independent numpy int8 reference to 1e-6 over 138 positions with 138/138 argmax
+agreement, 102 moves all legal, 16/16 forced wins, and a sandbox game won 10–0 with no
+compilation error. Submitted as test session 41169293.
 
 ## The plateau (H4) — and a prediction I registered badly
 
