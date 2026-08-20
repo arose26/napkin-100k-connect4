@@ -12,9 +12,11 @@ verified on seven arenas — so the toolchain ports and only the environment cha
 Hence one repo per game. This one is CodinGame's
 [Connect 4](https://www.codingame.com/multiplayer/bot-programming/connect-4).
 
-**Status: not submitted.** The engine, the GPU self-play, and the packer are
-verified (below). Training is in progress. There is no ladder number yet, and this
-README will not carry one until there is.
+**Status: not submitted.** The engine, the GPU self-play, and the packer are verified
+(below). A first training run is complete — **4,643,317 self-play games in 88 minutes
+on one laptop GPU** — and its headline result is a *negative* one: six times the
+self-play bought about 0.085 of score, and my registered prediction (H4) was not met.
+There is no ladder number yet, and this README will not carry one until there is.
 
 ## Why this game is not "just connect 4"
 
@@ -100,9 +102,9 @@ downstream, so this comes first and is reproducible.
 | … of which exercised the STEAL | 142 |
 | `gpu-parity --check-encode` — tensor vs reference | 512 games: legal sets, outcomes, **all 305 features** identical |
 | `gpu-parity` — outcomes only, larger | 2,048 games, 0 divergences |
-| `check-pack` — emitted C++ vs independent numpy int8 | 129 positions, max value drift **1e-6**, policy argmax **129/129** |
-| `check-bot` — the packed binary | all moves legal, forced wins **12/12** |
-| `pack` | **98,457 bytes**, 1,543 under the cap, blob round trip bit-exact |
+| `check-pack` — emitted C++ vs independent numpy int8 | 137 positions, max value drift **1e-6**, policy argmax **137/137** |
+| `check-bot` — the packed binary | 102 moves all legal, forced wins **16/16** |
+| `pack` | **98,458 bytes**, 1,542 under the cap, blob round trip bit-exact |
 
 The second engine is deliberately written in the referee's own idiom — a 7×9
 character grid, a column scanned downward, win detection by walking outward from the
@@ -143,20 +145,134 @@ better value signal than one-ply children, at a cost the GPU absorbs. *Answered 
 the value signal: 0.763 → 0.675 at equal games. NOT yet answered for playing
 strength — that needs the past-self measurement below.*
 
-**H4 — does more self-play still buy strength?** Prediction registered now, before
+**H4 — does more self-play still buy strength?** Prediction registered before
 looking: the net will beat its own 1M-game checkpoint at better than 0.60 after
-another 3M games. The previous repo's conclusion was that its plateau needed a
-different order of training compute rather than another knob; this measures whether
-that transfers. **Open.**
+another 3M games. **Answered: prediction NOT MET, though I registered it badly.** The
+final 4.64M-game net scores 0.585 (k=4) / 0.549 (k=8) against its 0.77M-game self and
+is indistinguishable from its 4.02M self. The threshold was registered without fixing
+the measurement protocol, and the verdict turns out to depend on it. See *The plateau*.
 
 **H5 — the ladder, and only the ladder, is the verdict.** Prediction registered
 before submission: the packed net clears Wood and Bronze on placement and finishes
 above the median of the arena's ranked bots. **Open — nothing has been submitted.**
 
-**H6 — does the net learn to steal?** The pie rule is the one decision here with no
-analogue in the previous game. Prediction: the trained net will use STEAL in a
-clear majority of games where it is offered, because a random opening book makes the
-first move informative. **Open.**
+**H6 — does the net learn to steal?** Prediction registered before looking: the
+trained net will use STEAL in a clear majority of games where it is offered.
+**Answered: YES, and more sharply than predicted** — 80% after a random opening ply,
+100% after its own preferred opening. See *What the net learned about the pie rule*.
+
+
+## The plateau (H4) — and a prediction I registered badly
+
+One run, 6,000 iterations, **4,643,317 self-play games in 5,253 s** (884 games/s
+end-to-end, including 288,000 optimiser steps).
+
+### First, is the instrument trustworthy?
+
+A flat reading is worthless if the measurement is blind, so the protocol is validated
+before it is used. Paired 8-ply or 4-ply random openings, both sides at identical
+search depth, 2,048 games:
+
+| control | k=4 | k=8 | what it establishes |
+|---|---|---|---|
+| **the same net on both seats** | **0.5000** (0.478–0.522) | **0.5000** (0.478–0.522) | pairing is exactly unbiased; seat advantage cancels |
+| same net, one side crippled to depth-1 search | 0.736 (0.716–0.754) | 0.661 (0.640–0.681) | a known handicap is resolved clearly |
+| final vs a randomly initialised net | — | 0.906 (0.887–0.923) | coarse resolution |
+| final vs the 10,500-game smoke net | — | 0.750 (0.723–0.776) | coarse resolution |
+
+Two things follow. The protocol is sound — an identical net against itself reads
+0.5000 to four places. And **the deeper opening book compresses differences**: every
+gap is smaller at k=8 than at k=4. So k=8 *understates* strength differences, and
+**k=4 is the right setting for past-self comparisons.**
+
+### The curve
+
+| final net (4.64M games) vs its own self at | k=4 | k=8 |
+|---|---|---|
+| 0.77M games | **0.585** (0.563–0.606) | 0.549 (0.519–0.580) |
+| 1.55M games | 0.516 (0.494–0.537) | 0.517 (0.486–0.547) |
+| 2.33M games | 0.540 (0.518–0.561) | 0.505 (0.475–0.536) |
+| 4.02M games | 0.498 (0.476–0.519) | 0.511 (0.481–0.542) |
+
+And the era when learning was supposedly still happening, 0.77M → 1.55M games, is
+itself only **0.548** (0.526–0.570) at k=4.
+
+Three honest readings:
+
+1. **Total progress over the run is small.** From 0.77M to 4.64M games — a 6× increase
+   in self-play — the net gains about 0.085 of score. The last 0.6M games gain nothing
+   (0.498, interval spanning 0.5).
+2. **The intermediate ordering is non-monotonic.** The final net beats its 2.33M self
+   more clearly (0.540) than its 1.55M self (0.516). A strictly improving lineage
+   cannot do that. This is either noise at the floor or genuine non-transitivity
+   between checkpoints, which self-play produces routinely; either way it is a warning
+   against reading a single past-self number as "progress".
+3. **I registered H4 badly.** The prediction was ">0.60 versus the 1M-game checkpoint"
+   with *no protocol fixed*. The point estimate is below 0.60 under both settings, but
+   only the k=8 interval excludes 0.60 — at k=4 the interval reaches 0.606. So: the
+   prediction is **not met**, and it is decisively falsified only under the protocol
+   that compresses differences most. A registered threshold without a registered
+   measurement is a half-registered hypothesis, and that is my error, recorded here
+   rather than resolved in my favour.
+
+The scripted yardstick agrees by saying nothing: 0.866 (0.844–0.886) at 1M games
+versus 0.881 (0.860–0.900) at 4.64M — overlapping intervals.
+
+### Why it plateaued — the policy head is already converged
+
+The policy loss sat at ~1.94 for the entire run, which looks stuck. It is not. The
+cross-entropy floor is the **target's own entropy**, and measured on the final net:
+
+```
+target entropy       1.9400   <- cross-entropy cannot go below this
+achieved cross-ent   1.9880
+excess (KL)          0.0479   <- all that training can still reduce
+uniform over 10      2.3026
+```
+
+The policy head has fit its teacher to within 0.048 nats. The teacher itself is
+blurry: at `tau=0.5` over Q values bounded in [-1, 1] the softmax spread is at most 4
+logits, so the target sits close to uniform over 10 actions by construction. **The
+net is faithfully imitating a deliberately soft teacher, and more games cannot fix
+that.**
+
+Scope this claim carefully. It explains why the *policy head* stopped improving; it
+does not by itself explain the strength plateau, because the deployed search uses the
+policy only for **move ordering** and the **value head** for leaf scoring. A blurry
+policy costs search depth, not move choice. The value loss (0.6155, from 0.6510 at 1M
+games) is the other half and is not explained by this measurement. Target temperature
+is therefore the *next experiment*, not the established cause.
+
+## What the net learned about the pie rule
+
+Nothing here is coded. These are the net's own 2-ply valuations at the empty board,
+with the opponent's steal already priced into the lookahead:
+
+```
+opening column:    0      1      2      3      4      5      6      7      8
+net's Q:        0.003  0.062  0.022 -0.210 -0.175 -0.221 -0.060  0.014  0.037
+                       ^^^^^ picks this        ^^^^^^ centre, and it hates it
+```
+
+Standard Connect 4 opening theory says play the centre. This net believes the centre
+is the **worst** opening available — and its own steal valuations say why:
+
+| after p0 opens | Q(steal) for p1 | Q(best drop) | net's choice |
+|---|---|---|---|
+| column 1 (off-centre) | -0.150 | -0.276 | STEAL |
+| column 4 (centre) | **+0.017** | -0.538 | STEAL |
+
+Opening in the centre hands the opponent a chip worth stealing. Opening off-centre
+hands over much less. The net steals in both cases — correctly, since the steal beats
+every drop — so it opens with the *least valuable* move it can. That is pie-rule
+strategy, arrived at by self-play from an encoder that was told only which cells are
+occupied and which lines are threatened.
+
+Stated as interpretation, not proof: these are the net's own valuations, not ground
+truth, and a net that plateaued at this strength may simply be wrong about the
+centre. What is verified is the internal consistency — its opening choice and its
+steal valuations agree with each other, and its behaviour is what the pie rule
+predicts.
 
 ## A methodology finding, recorded because it nearly cost me the experiment
 
@@ -206,8 +322,10 @@ saturates, the only yardstick with headroom is net-versus-past-self, which is wh
   judges. That will be smoke-tested in the sandbox — CodinGame's `TestSession/play`
   endpoint compiles and runs a bot **without** entering the arena — before any
   submission, not after.
-- **Strength is measured against one scripted opponent and a 1M-game past self.**
-  Neither is a population. Treat all of it as a smoke test.
+- **Strength is measured against one scripted opponent and the net's own past
+  selves.** Neither is a population of independent opponents, and past-self scores
+  cannot detect a whole lineage being stuck in the same local optimum. The ladder is
+  the only real test, which is why H5 is the one that counts.
 - **`greedy`, `random`, `ab` and `steal` are offline measuring sticks and are never
   submitted.** Standing series rule: every submission is the net. CodinGame leagues
   never demote, so a scripted promotion would permanently raise the net's starting
