@@ -12,9 +12,8 @@ verified on seven arenas — so the toolchain ports and only the environment cha
 Hence one repo per game. This one is CodinGame's
 [Connect 4](https://www.codingame.com/multiplayer/bot-programming/connect-4).
 
-**Status: v1 reached global rank 92 of 926 in the arena's top league. A stronger v2
-(0.605 head-to-head against v1) was submitted 2026-08-20; its placement is still
-settling and this README will not quote a rank for it until it stops moving.** The engine, the GPU self-play, and the packer are
+**Status: global rank 34 of 926 — top 3.7% of the arena, in its top league, sharing
+that league with the #1 bot.** A self-play-trained net in 98,373 bytes of C++. The engine, the GPU self-play, and the packer are
 verified (below). A first training run is complete — **4,643,317 self-play games in 88 minutes
 on one laptop GPU** — and its headline result is a *negative* one: six times the
 self-play bought about 0.085 of score, and my registered prediction (H4) was not met.
@@ -189,10 +188,23 @@ the venue's hardware, so the quantisation and the base85 decode survive the trip
 
 ```
 arena connect-4       926 ranked bots
-Napkin100k            global rank 92, score 27.44
+Napkin100k            global rank 34, score 32.24
 league                Wood 1  -- which is this arena's TOP league
 top of the ladder     RoboStac 46.07, _Royale 46.07, MrSubZero 45.99  (also Wood 1)
 ```
+
+| snapshot | rank | score | what it was |
+|---|---|---|---|
+| 15:45 UTC | 669 / 926 | 22.43 | **placement still running — no-data, see below** |
+| 17:30 UTC | 92 / 926 | 27.44 | v1 settled (4.64M games) |
+| 19:58 UTC | **34 / 926** | **32.24** | v2 settled (≈9.1M games, `tau=0.2`, `lr=5e-4`) |
+
+**The offline instrument predicted this, and that is the headline.** The paired
+past-self measurement said v2 beats v1 at 0.605 (0.584–0.626). The ladder then moved
+92 → 34 independently. Meanwhile the scripted yardstick rated the two nets 0.881 and
+0.883 — indistinguishable. In the previous repo the offline harness said "level" while
+the ladder moved 1,708 → 1,017, i.e. it had no predictive value at all; here it called
+a real gain before submission. Building the instrument first is what changed.
 
 **Wood 1 is the ceiling here.** This is a community arena where no higher leagues were
 ever opened — the API reports `openingLeaguesCount: 0` with two divisions, and the
