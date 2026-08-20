@@ -12,12 +12,13 @@ verified on seven arenas — so the toolchain ports and only the environment cha
 Hence one repo per game. This one is CodinGame's
 [Connect 4](https://www.codingame.com/multiplayer/bot-programming/connect-4).
 
-**Status: submitted 2026-08-20, first ladder reading is provisional and BAD** — see
-*First contact with the ladder*. The engine, the GPU self-play, and the packer are
+**Status: submitted 2026-08-20 — global rank 92 of 926, in the arena's top league,
+same league as the #1 bot.** See *First contact with the ladder*. The engine, the GPU self-play, and the packer are
 verified (below). A first training run is complete — **4,643,317 self-play games in 88 minutes
 on one laptop GPU** — and its headline result is a *negative* one: six times the
 self-play bought about 0.085 of score, and my registered prediction (H4) was not met.
-The net is now on the arena and the early number does not flatter it.
+The net is on the arena and H5 is answered — see below, including where I
+mis-registered it and where I called a mid-placement snapshot too early.
 
 ## Why this game is not "just connect 4"
 
@@ -180,20 +181,36 @@ through CodinGame's own sandbox endpoint, which compiles and plays a real game
 That last pair is the useful one: the packed forward pass is numerically identical on
 the venue's hardware, so the quantisation and the base85 decode survive the trip.
 
-**First ladder snapshot (provisional — placement may still be settling):**
+**Ladder result:**
 
 ```
-arena connect-4     926 ranked bots
-Napkin100k          global rank 669, score 22.43, league 0 (Wood)
-top of the ladder   RoboStac / _Royale / MrSubZero, score 46.07
+arena connect-4       926 ranked bots
+Napkin100k            global rank 92, score 27.44
+league                Wood 1  -- which is this arena's TOP league
+top of the ladder     RoboStac 46.07, _Royale 46.07, MrSubZero 45.99  (also Wood 1)
 ```
 
-Rank 669 of 926 is **below the median**, and still in Wood. H5's registered
-prediction was "clears Wood and Bronze on placement and finishes above the median."
-On this reading it is heading for falsified, which is recorded here now rather than
-after the fact. The league split is 259 bots in Wood and 668 above it, so global 669
-is the top of Wood — a promotion may still be pending. **Not resolving H5 until the
-score stops moving.**
+**Wood 1 is the ceiling here.** This is a community arena where no higher leagues were
+ever opened — the API reports `openingLeaguesCount: 0` with two divisions, and the
+league badge on RoboStac's rank-1 row reads *Wood 1*, identical to ours. So the bot is
+in the same league as the arena's strongest bots; there is no Bronze, Silver, Gold or
+Legend to climb to. It promoted out of the lower division within about two hours of
+submission.
+
+**H5, answered — and I registered half of it wrongly.** The prediction was "clears Wood
+and Bronze on placement and finishes above the median of the arena's ranked bots."
+
+- *Above the median*: **met decisively.** Rank 92 of 926; the median is 463.
+- *Clears Wood and Bronze*: **ill-posed.** This arena has no Bronze. I registered a
+  prediction about a league structure the venue does not have, having checked the
+  ruleset but not the league ladder. Recorded as a defect in the hypothesis, not as a
+  pass.
+
+**And a snapshot I read too early.** The first reading, taken ~15 minutes after
+submitting, showed rank 669 of 926 in the lower division, and I wrote that H5 was
+"heading for falsified". That was placement still running. Two hours later it was rank
+92. The lesson is the boring one: **a ladder snapshot taken during placement is not a
+result**, and I should have labelled it as no-data rather than as weak evidence.
 
 ### The pragma is worth 5.4× and the judge is 3.9× slower
 
@@ -344,6 +361,43 @@ truth, and a net that plateaued at this strength may simply be wrong about the
 centre. What is verified is the internal consistency — its opening choice and its
 steal valuations agree with each other, and its behaviour is what the pie rule
 predicts.
+
+## Does a sharper teacher help? (the soft-teacher hypothesis, tested)
+
+The plateau analysis said the policy head had fully fit a teacher that is soft by
+construction, and named target temperature as the next experiment. Three runs,
+identical seed and identical compute (600 iterations, 28,800 gradient steps), differing
+only in `tau`, then a round-robin under the validated protocol:
+
+| arm | policy loss | value loss | vs greedy | games seen |
+|---|---|---|---|---|
+| `tau=0.5` (the original) | 1.926 | 0.692 | 0.838 | 462,316 |
+| **`tau=0.2`** | 1.693 | **0.664** | 0.844 | 405,762 |
+| `tau=0.05` | 1.260 | 0.717 | 0.840 | 343,955 |
+
+| head to head (paired k=4, 2048 games) | score |
+|---|---|
+| `tau=0.2` vs `tau=0.5` | **0.525** (0.504–0.547) |
+| `tau=0.2` vs `tau=0.05` | **0.540** (0.518–0.562) |
+| `tau=0.5` vs `tau=0.05` | 0.513 (0.491–0.534) |
+| each against the 4.64M-game net | 0.403 / **0.446** / 0.387 |
+
+**Verdict: the hypothesis is supported, but the effect is small and non-monotonic.**
+`tau=0.2` is genuinely the best of the three — it beats both neighbours with intervals
+excluding 0.500, and it is the closest of the three to the 4.64M reference. Sharpening
+*further* to 0.05 hurts. So target temperature was a real knob and it was mis-set, but
+it is worth roughly 0.025 of score, not the plateau.
+
+**Which means the plateau is still unexplained.** The policy head was the half I could
+account for; the value head is the half that matters for a search that scores leaves
+with it, and its loss (0.664 at best) has barely moved across every intervention so
+far. That is the open question, stated as open.
+
+*Confound, named:* the arms are matched on iterations and gradient steps, not on games
+(462k / 406k / 344k). Sharper targets produce more decisive play and therefore longer
+games, so fewer games per iteration. Given the measured plateau — games barely matter
+in this range — the comparison is close to fair, but `tau=0.05` saw 26% fewer games
+than `tau=0.5` and some of its deficit is that.
 
 ## A methodology finding, recorded because it nearly cost me the experiment
 

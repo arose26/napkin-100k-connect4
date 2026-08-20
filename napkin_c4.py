@@ -947,7 +947,18 @@ def cmd_train_gpu(args):
     device = args.device if args.device != "auto" else (
         "cuda" if torch.cuda.is_available() else "cpu")
     torch.manual_seed(args.seed)
-    net = build_aznet(device)
+    if args.init:
+        # continue from a trained net instead of restarting. The measured plateau
+        # means a fresh run spends its first million games re-learning what this
+        # checkpoint already knows.
+        net, shape = load_aznet(args.init, device)
+        net.train()
+        if shape[1] != AZ_TRUNK1 or shape[2] != AZ_TRUNK2:
+            raise ValueError(f"{args.init} is trunk {shape[1]}-{shape[2]} but this "
+                             f"build is {AZ_TRUNK1}-{AZ_TRUNK2}")
+        print(f"warm start from {args.init} (trunk {shape[1]}-{shape[2]})", flush=True)
+    else:
+        net = build_aznet(device)
     opt = torch.optim.Adam(net.parameters(), lr=args.lr, weight_decay=1e-4)
 
     B = args.batch_games
@@ -2000,6 +2011,8 @@ def main():
     tg.add_argument("--eval-games", type=int, default=256)
     tg.add_argument("--device", default="auto")
     tg.add_argument("--seed", type=int, default=0)
+    tg.add_argument("--init", default=None,
+                    help="warm start from a checkpoint instead of random init")
     tg.add_argument("--snapshot-every", type=int, default=250)
     tg.add_argument("--out", default="out/gpunet.pt")
     pk = sub.add_parser("pack")
