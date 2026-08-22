@@ -935,6 +935,24 @@ def evaluate_vs_greedy(net, device, games, seed, open_plies=8, depth=2):
     return sc, n
 
 
+def best_response_step(t, learner_seat, learner_mv, opp_mv):
+    """Who moves, and whose plies get recorded, in best-response mode.
+
+    Returns (mv, record): `mv` takes the learner's action on the learner's turns
+    and the frozen opponent's on the others; `record` is true only for live
+    learner plies.
+
+    Extracted so it can be asserted on. Recording an OPPONENT ply would store it
+    with the learner's outcome sign, which silently inverts the value target for
+    that sample -- the same class of bug that cost the tic-tac-toe repo two
+    debugging rounds ("negating is right in pure self-play but wrong against a
+    fixed opponent").
+    """
+    import torch
+    mine = t.side == learner_seat
+    return torch.where(mine, learner_mv, opp_mv), (~t.done) & mine
+
+
 def cmd_train_gpu(args):
     """Self-play on GPU with one-ply-improved policy targets.
 
@@ -965,9 +983,28 @@ def cmd_train_gpu(args):
         net = build_aznet(device)
     opt = torch.optim.Adam(net.parameters(), lr=args.lr, weight_decay=1e-4)
 
+    # A frozen opponent turns self-play into best-response training: only the
+    # learner's transitions are stored, so the net is optimised specifically
+    # against THAT policy. With --opponent pointing at our own deployed bot this
+    # trains a nemesis, which measures how exploitable the deployed bot is.
+    # Self-play's opponent distribution is a single policy (the current net); this
+    # is the tool for asking whether that is why our offline edge does not reach
+    # the ladder.
+    opp_net = None
+    if getattr(args, "opponent", None):
+        opp_net, oshape = load_aznet(args.opponent, device)
+        if list(oshape) != [N_IN, AZ_TRUNK1, AZ_TRUNK2, N_ACT]:
+            raise ValueError(f"{args.opponent} has shape {list(oshape)} but this "
+                             f"build is {[N_IN, AZ_TRUNK1, AZ_TRUNK2, N_ACT]}")
+        for q in opp_net.parameters():
+            q.requires_grad_(False)
+        print(f"frozen opponent: {args.opponent} (best-response mode)", flush=True)
+
     B = args.batch_games
     t = TensorC4(B, device)
     MAXP = CELLS + 1
+    # which seat the learner occupies, alternating so neither seat is favoured
+    learner_seat = (torch.arange(B, device=device) % 2) if opp_net is not None else None
 
     st_x = torch.zeros(B, MAXP, N_IN, device=device)
     st_p = torch.zeros(B, MAXP, N_ACT, device=device)
@@ -999,6 +1036,11 @@ def cmd_train_gpu(args):
             mv = torch.where(plies < args.opening_plies, mv_s, pi.argmax(dim=1))
 
             live = ~t.done
+            if opp_net is not None:
+                _, opi, _ = improved_policy(t, opp_net, tau=args.tau,
+                                            depth=args.depth)
+                mv, live = best_response_step(t, learner_seat, mv,
+                                              opi.argmax(dim=1))
             slot = plies.clamp(max=MAXP - 1)
             st_x[ar, slot] = torch.where(live.unsqueeze(1), x, st_x[ar, slot])
             st_p[ar, slot] = torch.where(live.unsqueeze(1), pi, st_p[ar, slot])
@@ -1928,6 +1970,37 @@ def cmd_selfcheck(args):
                 assert a[off + c] == b[off + COL_MIRROR[c]], (off, c)
         assert a[297:] == b[297:]
 
+    # best-response collection: only the LEARNER's plies may be recorded, and the
+    # opponent must actually get to move. Storing an opponent ply would invert the
+    # value target's sign for that sample.
+    try:
+        import torch
+        dev = "cpu"
+        B = 8
+        tt = TensorC4(B, dev)
+        seat = torch.arange(B, device=dev) % 2
+        rec_sides, moved = [], 0
+        for _ in range(12):
+            lg = tt.legal_mask().float()
+            a_l = torch.multinomial(lg + 1e-9, 1).squeeze(1)
+            a_o = torch.multinomial(lg + 1e-9, 1).squeeze(1)
+            mv, rec = best_response_step(tt, seat, a_l, a_o)
+            # every recorded entry must be a position where the learner is to move
+            assert bool((tt.side[rec] == seat[rec]).all()), "recorded an opponent ply"
+            # and the action taken must be the learner's on its own turns
+            assert bool((mv[rec] == a_l[rec]).all()), "learner's action not used"
+            opp_turn = (tt.side != seat) & ~tt.done
+            assert bool((mv[opp_turn] == a_o[opp_turn]).all()), "opponent did not move"
+            assert not bool(rec[opp_turn].any()), "recorded on the opponent's turn"
+            rec_sides.append(int(rec.sum()))
+            moved += 1
+            tt.step(mv)
+        assert sum(rec_sides) > 0, "nothing was ever recorded"
+        # over a full game each side moves about half the plies
+        assert sum(rec_sides) <= moved * B, "recorded more plies than were played"
+    except ImportError:
+        print("selfcheck: torch absent, skipped the best-response contract")
+
     # the base85 alphabet: 85 distinct characters, none of them able to break a
     # C string literal or form a trigraph
     assert len(B85_ALPHABET) == 85 == len(set(B85_ALPHABET))
@@ -2037,6 +2110,9 @@ def main():
     tg.add_argument("--eval-games", type=int, default=256)
     tg.add_argument("--device", default="auto")
     tg.add_argument("--seed", type=int, default=0)
+    tg.add_argument("--opponent", default=None,
+                    help="freeze this checkpoint as the opponent "
+                         "(best-response / nemesis training)")
     tg.add_argument("--init", default=None,
                     help="warm start from a checkpoint instead of random init")
     tg.add_argument("--snapshot-every", type=int, default=250)
